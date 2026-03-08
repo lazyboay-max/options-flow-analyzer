@@ -1,0 +1,90 @@
+name: Options Flow Analysis
+
+on:
+  workflow_dispatch:  # Manual trigger from browser
+    inputs:
+      analysis_mode:
+        description: 'Analysis Mode'
+        required: true
+        default: 'top_5'
+        type: choice
+        options:
+          - top_5
+          - custom_ticker
+      ticker:
+        description: 'Ticker Symbol (for custom analysis)'
+        required: false
+        default: 'SPY'
+      dte_min:
+        description: 'Minimum DTE'
+        required: false
+        default: '36'
+      dte_max:
+        description: 'Maximum DTE'
+        required: false
+        default: '50'
+  schedule:
+    - cron: '0 */20 * * *'  # Every 20 minutes during market hours
+
+jobs:
+  analyze-options:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install playwright pandas selenium-wire
+          playwright install chromium
+      
+      - name: Run Discord Data Collection
+        env:
+          DISCORD_EMAIL: ${{ secrets.DISCORD_EMAIL }}
+          DISCORD_PASSWORD: ${{ secrets.DISCORD_PASSWORD }}
+        run: |
+          python scripts/collect_discord_flow.py
+      
+      - name: Run TradingView Analysis
+        env:
+          TRADINGVIEW_USERNAME: ${{ secrets.TRADINGVIEW_USERNAME }}
+          TRADINGVIEW_PASSWORD: ${{ secrets.TRADINGVIEW_PASSWORD }}
+        run: |
+          python scripts/collect_tradingview_data.py
+      
+      - name: Run Tastytrade Data Collection
+        env:
+          TASTYTRADE_USERNAME: ${{ secrets.TASTYTRADE_USERNAME }}
+          TASTYTRADE_PASSWORD: ${{ secrets.TASTYTRADE_PASSWORD }}
+        run: |
+          python scripts/collect_tastytrade_data.py
+      
+      - name: Generate Analysis Report
+        run: |
+          python scripts/generate_report.py \
+            --mode ${{ github.event.inputs.analysis_mode || 'top_5' }} \
+            --ticker ${{ github.event.inputs.ticker || 'SPY' }} \
+            --dte-min ${{ github.event.inputs.dte_min || '36' }} \
+            --dte-max ${{ github.event.inputs.dte_max || '50' }}
+      
+      - name: Deploy Report to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./reports
+          publish_branch: gh-pages
+          keep_files: false
+      
+      - name: Upload Analysis Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: options-analysis-${{ github.run_number }}
+          path: reports/
+          retention-days: 30
